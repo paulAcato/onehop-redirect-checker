@@ -10,6 +10,8 @@ namespace Onehop\RedirectChecker\Admin;
 use Onehop\RedirectChecker\Includes\Caps;
 use Onehop\RedirectChecker\Includes\Installer;
 use Onehop\RedirectChecker\Includes\Log_Repository;
+use Onehop\RedirectChecker\Includes\Rest_Controller;
+use Onehop\RedirectChecker\Includes\Scheduler;
 use Onehop\RedirectChecker\Includes\Singleton;
 
 defined( 'ABSPATH' ) || exit;
@@ -86,6 +88,21 @@ final class Dashboard_Widget extends Singleton {
 	 */
 	public function enqueue(): void {
 		wp_enqueue_style( 'onehop-redirect-checker-widget', ONEHOP_REDIRECT_CHECKER_URL . 'assets/dashboard-widget.css', [], ONEHOP_REDIRECT_CHECKER_VERSION );
+
+		if ( self::first_scan_pending() ) {
+			wp_enqueue_script( 'onehop-redirect-checker-widget', ONEHOP_REDIRECT_CHECKER_URL . 'assets/dashboard-widget.js', [ 'wp-api-fetch' ], ONEHOP_REDIRECT_CHECKER_VERSION, [ 'in_footer' => true ] );
+		}
+	}
+
+	/**
+	 * Whether this widget starts the first scan: the one queued on activation has not run yet
+	 * (WP-Cron held up), and this user may run scans. The cron check comes first: it is free (the
+	 * cron array is autoloaded) and false on every site that has scanned before.
+	 *
+	 * @return bool
+	 */
+	private static function first_scan_pending(): bool {
+		return Scheduler::activation_pending() && Caps::can_manage() && Installer::is_installed() && null === Log_Repository::latest_scan();
 	}
 
 	/**
@@ -166,6 +183,21 @@ final class Dashboard_Widget extends Singleton {
 		$link     = Caps::can_manage() ? admin_url( 'tools.php?page=' . Admin_Page::SLUG ) : '';
 
 		echo '<div class="rdi-widget">';
+
+		if ( ! $latest && self::first_scan_pending() ) {
+			// assets/dashboard-widget.js runs it, then swaps in the widget with the results.
+			printf(
+				'<p class="rdi-widget__empty rdi-widget__first-scan" role="status" data-path="%1$s" data-done="%2$s" data-busy="%3$s" data-failed="%4$s"><span class="spinner is-active"></span>%5$s</p>',
+				esc_attr( '/' . Rest_Controller::NAMESPACE . '/scans' ),
+				esc_attr__( 'The first scan is done. Reload this page to see the results.', 'onehop-redirect-checker' ),
+				esc_attr__( 'A scan is already running. Reload this page in a moment.', 'onehop-redirect-checker' ),
+				esc_attr__( 'The first scan could not run:', 'onehop-redirect-checker' ),
+				esc_html__( 'Running the first scan…', 'onehop-redirect-checker' )
+			);
+			$this->footer( $link, __( 'Open the dashboard', 'onehop-redirect-checker' ) );
+			echo '</div>';
+			return;
+		}
 
 		if ( ! $latest ) {
 			echo '<p class="rdi-widget__empty">' . esc_html__( 'No scan yet.', 'onehop-redirect-checker' ) . '</p>';

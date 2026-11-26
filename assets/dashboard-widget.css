@@ -393,3 +393,15 @@ a.rdi-widget__tile:hover .rdi-widget__tile-label {
 		border: 1px solid LinkText;
 	}
 }
+
+/* The first scan, started from the widget while WP-Cron has not run it. */
+#onehop-redirect-checker .rdi-widget__first-scan {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+}
+
+#onehop-redirect-checker .rdi-widget__first-scan .spinner {
+	float: none;
+	margin: 0;
+}

@@ -8,19 +8,17 @@ import { useMutation } from '../api/hooks';
 import type { Fix, Fixed, Issue, LiveResult as Result } from '../api/types';
 import { relative } from '../lib/format';
 import { typeMeta } from '../lib/meta';
+import { FixModal, NO_DISABLE } from './FixModal';
 import { HopPath } from './HopPath';
 import { LiveResult } from './LiveResult';
 import { SeverityBadge } from './SeverityBadge';
 
-/** Plugins without an "off" state: switching a rule off removes it there. */
-const NO_DISABLE = ['yoast', 'simple-301'];
+/** Chains and loops change several rules: they are reviewed in a modal, the rest inline. */
+const inModal = (fix: Fix): boolean => 'disable' !== fix.action;
 
-/** What the fix will do, in words, for the confirmation. */
+/** What a switch-off fix will do, in words, for the inline confirmation. */
 const describe = (fix: Fix): string => {
 	const [first] = fix.rules;
-	if ('retarget' === fix.action) {
-		return sprintf(/* translators: 1: source URL, 2: new target, 3: plugin. */ __('Point %1$s straight to %2$s in %3$s?', 'onehop-redirect-checker'), first.from, fix.to ?? '', first.label);
-	}
 	if (fix.rules.length > 1) {
 		return sprintf(/* translators: %d: number of rules. */ _n('Switch off %d duplicate rule?', 'Switch off %d duplicate rules?', fix.rules.length, 'onehop-redirect-checker'), fix.rules.length);
 	}
@@ -29,7 +27,7 @@ const describe = (fix: Fix): string => {
 		: sprintf(/* translators: 1: source URL, 2: plugin. */ __('Switch off the rule for %1$s in %2$s? You can switch it back on there.', 'onehop-redirect-checker'), first.from, first.label);
 };
 
-const fixLabel = (fix: Fix): string => ('retarget' === fix.action ? __('Shorten chain', 'onehop-redirect-checker') : __('Switch off rule', 'onehop-redirect-checker'));
+const fixLabel = (fix: Fix): string => (inModal(fix) ? _x('Fix', 'button: fix a redirect chain or loop', 'onehop-redirect-checker') : __('Switch off rule', 'onehop-redirect-checker'));
 
 export const IssueCard = ({ issue }: { issue: Issue }) => {
 	const [live, setLive] = useState<Result | null>(issue.live);
@@ -81,10 +79,10 @@ export const IssueCard = ({ issue }: { issue: Issue }) => {
 		}
 	};
 
-	const applyFix = async () => {
+	const applyFix = async (keep = 0) => {
 		setError(null);
 		try {
-			const result = await apply.run(route(`/issues/${issue.id}/fix`), 'POST');
+			const result = await apply.run(route(`/issues/${issue.id}/fix`), 'POST', { keep });
 			setFixed(result);
 			setConfirming(false);
 			// The fix took the issue off the scan's counts and score: reload the tiles, charts and
@@ -92,7 +90,10 @@ export const IssueCard = ({ issue }: { issue: Issue }) => {
 			invalidate();
 			speak(__('Fix applied. The numbers are updated.', 'onehop-redirect-checker'), 'polite');
 		} catch (caught) {
-			closeConfirm();
+			// The modal stays open with the error, so the person sees what failed where they acted.
+			if (!issue.fix || !inModal(issue.fix)) {
+				closeConfirm();
+			}
 			fail(caught);
 		}
 	};
@@ -125,10 +126,10 @@ export const IssueCard = ({ issue }: { issue: Issue }) => {
 						relative(fixed.at)
 					)}
 				</p>
-			) : confirming && issue.fix ? (
+			) : confirming && issue.fix && !inModal(issue.fix) ? (
 				<div className="rdi-issue__confirm" role="group" aria-label={__('Confirm fix', 'onehop-redirect-checker')}>
 					<span>{describe(issue.fix)}</span>
-					<Button ref={applyRef} variant="primary" size="compact" isBusy={apply.busy} disabled={apply.busy} accessibleWhenDisabled onClick={applyFix}>
+					<Button ref={applyRef} variant="primary" size="compact" isBusy={apply.busy} disabled={apply.busy} accessibleWhenDisabled onClick={() => applyFix()}>
 						{apply.busy ? __('Applying…', 'onehop-redirect-checker') : __('Apply', 'onehop-redirect-checker')}
 					</Button>
 					<Button variant="tertiary" size="compact" disabled={apply.busy} accessibleWhenDisabled onClick={closeConfirm}>
@@ -141,12 +142,25 @@ export const IssueCard = ({ issue }: { issue: Issue }) => {
 						{check_.busy ? __('Checking…', 'onehop-redirect-checker') : __('Verify live', 'onehop-redirect-checker')}
 					</Button>
 					{issue.fix && (
-						<Button ref={triggerRef} variant="secondary" size="compact" icon={tool} onClick={() => setConfirming(true)} aria-describedby={error ? errorId : undefined}>
-							{__('Apply fix', 'onehop-redirect-checker')}: {fixLabel(issue.fix)}
+						<Button ref={triggerRef} variant="primary" size="compact" icon={tool} onClick={() => setConfirming(true)} aria-describedby={error ? errorId : undefined}>
+							{fixLabel(issue.fix)}
 						</Button>
 					)}
-					{error && <span className="rdi-issue__error" id={errorId}>{error}</span>}
+					{error && !confirming && <span className="rdi-issue__error" id={errorId}>{error}</span>}
 				</footer>
+			)}
+
+			{confirming && !fixed && issue.fix && inModal(issue.fix) && (
+				<FixModal
+					fix={issue.fix}
+					busy={apply.busy}
+					error={error}
+					onApply={applyFix}
+					onClose={() => {
+						setError(null);
+						closeConfirm();
+					}}
+				/>
 			)}
 
 			{live && <LiveResult result={live} />}

@@ -100,6 +100,37 @@ check( 'loop names all three plugins', count( explode( ',', $i[0]['plugins'] ) )
 check( 'chain detected', $c['chain'] ?? 0, 1 );
 check( 'chain fix retargets to final URL', $i[0]['fix']['to'] ?? null, '/new' );
 
+$by_type = static fn( array $issues, string $type ) => array_values( array_filter( $issues, static fn( $issue ) => $type === $issue['type'] ) );
+
+[ $i ] = analyse( [ new Rule( 'redirection', '1', '/a1', '/a2' ), new Rule( 'redirection', '2', '/a2', '/a3' ), new Rule( 'redirection', '3', '/a3', '/a4' ) ] );
+$chain = $by_type( $i, 'chain' )[0] ?? [];
+check( 'chain fix points every rule but the last to the end', array_column( $chain['fix']['rules'] ?? [], 'id' ), [ '1', '2' ] );
+check( 'chain fix requires the last rule unchanged', array_column( $chain['fix']['requires'] ?? [], 'id' ), [ '3' ] );
+
+[ $i ] = analyse( [ new Rule( 'redirection', '1', '/l1', '/l2' ), new Rule( 'redirection', '2', '/l2', '/l3' ), new Rule( 'redirection', '3', '/l3', '/l1' ) ] );
+$loop = $by_type( $i, 'loop' )[0] ?? [];
+check( 'loop fix breaks the loop', $loop['fix']['action'] ?? null, 'break' );
+check( 'loop fix lists the rules in hop order, first URL first', array_column( $loop['fix']['rules'] ?? [], 'from' ), [ '/l1', '/l2', '/l3' ] );
+
+[ $i ] = analyse( [ new Rule( 'redirection', '1', '^/blog/(.*)$', '/news/$1', 301, Rule::MATCH_REGEX ), new Rule( 'redirection', '2', '^/news/(.+)$', '/blog/$1', 301, Rule::MATCH_REGEX ) ] );
+check( 'loop of pattern rules gets no automatic fix', $by_type( $i, 'loop' )[0]['fix'] ?? [], [] );
+check( 'loop fix offers every URL when nothing else redirects them', $loop['fix']['candidates'] ?? null, [ 0, 1, 2 ] );
+
+[ $i ] = analyse( [ new Rule( 'redirection', '1', '/l1', '/l2' ), new Rule( 'yoast', '9', '/l1', '/l3' ), new Rule( 'redirection', '2', '/l2', '/l3' ), new Rule( 'redirection', '3', '/l3', '/l1' ) ] );
+check( 'loop fix never keeps a URL another rule would take over', $by_type( $i, 'loop' )[0]['fix']['candidates'] ?? null, [ 1, 2 ] );
+
+[ $i ] = analyse( [ new Rule( 'redirection', '1', '/old', '/blog/x' ), new Rule( 'redirection', '2', '^/blog/(.*)$', '/news/$1', 301, Rule::MATCH_REGEX ), new Rule( 'redirection', '3', '/news/x', '/final' ) ] );
+$chain = array_values( array_filter( $by_type( $i, 'chain' ), static fn( $issue ) => '/old' === $issue['source_url'] ) )[0] ?? [];
+check( 'chain with a pattern in between still points its first rule to the end', array_column( $chain['fix']['rules'] ?? [], 'id' ), [ '1' ] );
+
+$normalizer = new Url_Normalizer( 'https://example.test/', 'https://example.test/' );
+$rules      = [ new Rule( 'redirection', '1', '/w1', '/w2' ), new Rule( 'custom', '2', '/w2', '/w3' ), new Rule( 'redirection', '3', '/w3', '/w4' ) ];
+$matcher    = new Matcher( $normalizer, microtime( true ) + 10 );
+$matcher->add( $rules );
+$i     = ( new Analyzer( $matcher, $normalizer, microtime( true ) + 10, [ 'redirection' ] ) )->run( $rules );
+$chain = array_values( array_filter( $by_type( $i, 'chain' ), static fn( $issue ) => '/w1' === $issue['source_url'] ) )[0] ?? [];
+check( 'chain fix leaves rules of a read-only source alone', array_column( $chain['fix']['rules'] ?? [], 'id' ), [ '1' ] );
+
 [ , $c ] = analyse( [ new Rule( 'redirection', '1', '/self', '/self' ) ] );
 check( 'self-redirect is a loop', $c['loop'] ?? 0, 1 );
 

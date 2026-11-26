@@ -10,6 +10,7 @@ namespace Onehop\RedirectChecker\Includes;
 use Onehop\RedirectChecker\Includes\Analysis\Analyzer;
 use Onehop\RedirectChecker\Includes\Analysis\Matcher;
 use Onehop\RedirectChecker\Includes\Sources\Registry;
+use Onehop\RedirectChecker\Includes\Sources\Writable;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -83,15 +84,22 @@ final class Scanner {
 				throw new \RuntimeException( __( 'Could not start a scan.', 'onehop-redirect-checker' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Shown as text.
 			}
 
+			// Any scan gives the dashboard its first data: a still-pending activation scan is not needed.
+			wp_clear_scheduled_hook( Scheduler::ACTIVATION_HOOK );
+
 			$deadline   = $started + self::TIME_BUDGET;
 			$normalizer = new Url_Normalizer();
 			$matcher    = new Matcher( $normalizer, $deadline );
 			$rules      = [];
 			$per_source = [];
+			$writable   = [];
 
 			foreach ( Registry::all() as $slug => $source ) {
 				$available = $source->is_available();
 				$count     = 0;
+				if ( $source instanceof Writable ) {
+					$writable[] = $slug;
+				}
 
 				if ( $available ) {
 					// Page over the stored rows; an adapter may drop rows (non-redirect codes) or
@@ -113,7 +121,7 @@ final class Scanner {
 			}
 
 			$matcher->add( $rules );
-			$analyzer = new Analyzer( $matcher, $normalizer, $deadline );
+			$analyzer = new Analyzer( $matcher, $normalizer, $deadline, $writable );
 			$issues   = $analyzer->run( $rules );
 			$partial  = $analyzer->partial;
 

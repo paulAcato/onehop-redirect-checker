@@ -167,6 +167,30 @@ final class Matcher {
 	}
 
 	/**
+	 * Whether this exact rule is the only rule matching its source: no other exact rule for the same
+	 * URL and no pattern rule. Switching it off then leaves the URL unredirected. Out of the pattern
+	 * budget, the answer is no.
+	 *
+	 * @param Rule $rule Exact rule.
+	 *
+	 * @return bool
+	 */
+	public function is_only_match( Rule $rule ): bool {
+		$key = $this->normalizer->key( $rule->from );
+		if ( count( $this->exact[ Url_Normalizer::fold( $key ) ] ?? [] ) !== 1 ) {
+			return false;
+		}
+
+		foreach ( $this->patterns as $pattern ) {
+			if ( ! $this->within_budget() || null !== $this->apply( $pattern, $key ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
 	 * Whether this exact rule is the one that fires for its source (not a losing duplicate).
 	 *
 	 * @param Rule $rule Exact rule.

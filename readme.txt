@@ -4,7 +4,7 @@ Tags: redirects, redirect loop, redirect chain, 301, seo
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 1.2.1
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -53,7 +53,8 @@ Under Tools → Onehop Redirect Checker:
 * Charts of the health score and of issues by severity over time.
 * A searchable, filterable list of issues, each showing the full redirect path and which plugin owns every hop. Search with plain text or, with the .* switch, a regular expression (such as `^/blog/`). When a scan finds nothing, an "All clear" overview shows the checks it passed.
 * **Verify live**: follows the real redirects of an issue over HTTP, on your own site only, to confirm what visitors get.
-* **Apply fix**: only where the fix is clear-cut. A chain is shortened by pointing its first rule at the final URL; a duplicate, self-redirect, redundant rule or rule hiding content is switched off. You confirm each change first.
+* **Fix**: for chains and loops, a dialog lists every rule it changes before anything is written. A chain is shortened by pointing each of its rules straight at the final URL. A loop has no end, so you choose the URL that should load: its rule is switched off and every other URL in the loop redirects straight to it.
+* **Switch off rule**: a duplicate, self-redirect, redundant rule or rule hiding content is switched off, after you confirm it.
 * **Leftover redirects**: a redirect plugin that is no longer active but still holds rules is detected. Review its rules in a dialog, then migrate them into an active redirect plugin, delete single rules, or delete all of its data (and, for plugins with their own tables, the tables). Regex, wildcard and prefix rules are migrated as they are where the other plugin supports them; into a plugin that only holds exact rules (Simple 301 Redirects, 301 Redirects), they are copied as exact rules for the URLs your site is known to have: published content, the sources and targets of other rules, and URLs from Redirection's 404 log. Only plain paths become rules (no spaces, control characters, markup or `*`), and what is migrated is exactly what the dialog listed: if anything changed meanwhile, you are asked to review it again. On a multisite network, only a network administrator can drop another plugin's tables.
 * **Scan history** with a date picker (limited to the days that have scans) and sortable columns.
 * **Scheduled scans**: daily, weekly (on the weekdays you pick) or monthly (on a day of the month or the last day), at the hours you pick, in the site's timezone.
@@ -114,11 +115,11 @@ To rebuild `dist/` from a clone of that repository with Node 24 or newer: `npm c
 
 = Does it change my redirects on its own? =
 
-No. Scans only read. Rules change only when you choose Apply fix or Migrate and confirm it.
+No. Scans only read. Rules change only when you choose Fix, Switch off rule or Migrate and confirm it.
 
-= Why does a loop have no Apply fix button? =
+= How does Fix break a loop? =
 
-Breaking a loop means choosing which rule is wrong, and only you know that. Fixes are offered only where there is one clear answer.
+A loop has no end, so you choose which of its URLs should load as a page. Only URLs that no other rule redirects are offered, because another rule could otherwise take over and keep the loop going. That URL's rule is switched off and every other URL in the loop redirects straight to it. Afterwards, use Verify live to check that the URL shows a page. Loops made of pattern (regex, wildcard) rules have no automatic fix: change them in the plugin that owns them.
 
 = Can I undo a fix? =
 
@@ -150,6 +151,14 @@ Rules are read in batches and analysed within a time budget. If a scan reaches t
 6. Leftover rules of an inactive plugin: review them, migrate them into an active plugin, or delete them.
 
 == Changelog ==
+
+= 1.3.0 =
+* New: Fix for loops. Choose which URL in the loop should load; its rule is switched off and every other URL in the loop redirects straight to it.
+* Fix for chains now points every rule in the chain straight to the final URL, not only the first one, so each URL takes a single hop. The chains that started further along are marked fixed with it.
+* A fix that changes several rules and fails partway puts back what it already changed, so you can apply it again.
+* Both open a dialog that lists every rule they change, old and new target, before anything is written. Run a new scan to get these fixes on issues found before 1.3.0.
+* The fix buttons are now primary buttons named after what they do: Fix, or Switch off rule.
+* Fix: the first scan after activation no longer waits for WP-Cron, which on a quiet site, with a failing loopback request or with `DISABLE_WP_CRON` could take long or never happen. With `DISABLE_WP_CRON` it runs during activation; otherwise the dashboard or the Dashboard widget starts it when you open it.
 
 = 1.2.1 =
 * Applying a fix now takes the issue off the numbers straight away: the count of its type and severity, the issue total and the health score, on the dashboard, the Dashboard widget, in WP-CLI and for AI clients. You no longer need a new scan to see them change.
