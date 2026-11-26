@@ -137,6 +137,13 @@ final class Rest_Controller extends Singleton {
 					'methods'             => WP_REST_Server::CREATABLE,
 					'permission_callback' => $manage,
 					'callback'            => [ $this, 'start_scan' ],
+					'args'                => [
+						// The dashboard or widget starting the scan queued on activation itself.
+						'first' => [
+							'type'    => 'boolean',
+							'default' => false,
+						],
+					],
 				],
 			]
 		);
@@ -149,10 +156,16 @@ final class Rest_Controller extends Singleton {
 				'permission_callback' => $manage,
 				'callback'            => [ $this, 'apply_fix' ],
 				'args'                => [
-					'id' => [
+					'id'   => [
 						'type'              => 'integer',
 						'minimum'           => 1,
 						'sanitize_callback' => 'absint',
+					],
+					// Loop fix: which of the loop's rules keeps its URL as the page that loads.
+					'keep' => [
+						'type'    => 'integer',
+						'minimum' => 0,
+						'default' => 0,
 					],
 				],
 			]
@@ -427,9 +440,13 @@ final class Rest_Controller extends Singleton {
 			];
 		}
 
+		$latest = Log_Repository::latest_scan();
+
 		return new WP_REST_Response(
 			[
-				'latest'        => Log_Repository::latest_scan(),
+				'latest'        => $latest,
+				// The activation scan has not run yet (WP-Cron held up): the dashboard starts it itself.
+				'first_scan'    => null === $latest && Scheduler::activation_pending(),
 				'trend'         => array_map(
 					static fn( $scan ) => [
 						'id'          => $scan['id'],
@@ -546,11 +563,14 @@ final class Rest_Controller extends Singleton {
 	/**
 	 * Run a scan now.
 	 *
+	 * @param WP_REST_Request $request Request.
+	 *
 	 * @return WP_REST_Response|WP_Error
 	 */
-	public function start_scan() {
+	public function start_scan( WP_REST_Request $request ) {
 		try {
-			return new WP_REST_Response( Scanner::run( 'manual' ), 201 );
+			$first = $request['first'] && Scheduler::activation_pending();
+			return new WP_REST_Response( Scanner::run( $first ? 'activation' : 'manual' ), 201 );
 		} catch ( \RuntimeException $error ) {
 			return new WP_Error( 'onehop_redirect_checker_scan_failed', $error->getMessage(), [ 'status' => 409 === $error->getCode() ? 409 : 500 ] );
 		}
@@ -565,7 +585,7 @@ final class Rest_Controller extends Singleton {
 	 */
 	public function apply_fix( WP_REST_Request $request ) {
 		try {
-			return new WP_REST_Response( Fixer::apply( (int) $request['id'] ) );
+			return new WP_REST_Response( Fixer::apply( (int) $request['id'], (int) $request['keep'] ) );
 		} catch ( \RuntimeException $error ) {
 			return new WP_Error( 'onehop_redirect_checker_fix_failed', $error->getMessage(), [ 'status' => in_array( $error->getCode(), [ 400, 409 ], true ) ? $error->getCode() : 500 ] );
 		}

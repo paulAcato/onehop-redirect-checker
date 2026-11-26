@@ -59,7 +59,7 @@ export const steps = (): TourStep[] => [
 		since: '1.0.0',
 		target: '.rdi-issue__footer',
 		title: __('Verify and fix', 'onehop-redirect-checker'),
-		text: __('Verify live requests the URL on this site to confirm what visitors get. Apply fix appears when the fix is clear-cut, and changes the rule in the plugin it belongs to.', 'onehop-redirect-checker'),
+		text: __('Verify live requests the URL on this site to confirm what visitors get. Fix and Switch off rule appear when the fix is clear-cut, and change the rules in the plugin they belong to.', 'onehop-redirect-checker'),
 	},
 	{
 		since: '1.0.0',

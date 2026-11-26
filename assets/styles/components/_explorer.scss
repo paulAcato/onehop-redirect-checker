@@ -632,6 +632,25 @@
 	}
 }
 
+// Fix a chain or loop: the URL to keep, and the check to do afterwards.
+.rdi-fix {
+	&__keep {
+		margin-block-end: 0.75lh;
+
+		code,
+		label {
+			overflow-wrap: anywhere;
+		}
+	}
+
+	&__note {
+		margin-block: 0.75lh 0;
+		margin-inline: 0;
+		color: $ink-secondary;
+		font-size: 13px;
+	}
+}
+
 // The modal renders into <body>; give it the scheme's surface.
 .rdi-page .rdi-migrate.components-modal__frame {
 	background: $surface;

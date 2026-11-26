@@ -1,5 +1,5 @@
 import { Button, Notice, Spinner } from '@wordpress/components';
-import { useEffect, useState } from '@wordpress/element';
+import { useEffect, useRef, useState } from '@wordpress/element';
 import { speak } from '@wordpress/a11y';
 import { __, _n, sprintf } from '@wordpress/i18n';
 import { errorMessage, invalidate, isAbort, refresh, route } from '../api/client';
@@ -128,10 +128,10 @@ export const App = () => {
 		});
 	};
 
-	const runScan = async () => {
+	const runScan = async (auto = false) => {
 		setFeedback(null);
 		try {
-			const result = await scan.run(route('/scans'), 'POST');
+			const result = await scan.run(route('/scans'), 'POST', auto ? { first: true } : undefined);
 			invalidate();
 			const text = sprintf(
 				/* translators: 1: number of rules, 2: number of issues, 3: duration. */
@@ -146,10 +146,26 @@ export const App = () => {
 			if (isAbort(caught)) {
 				return;
 			}
+			// The first scan, started by another tab at the same time: show that one running instead.
+			if (auto && 409 === (caught as { data?: { status?: number } })?.data?.status) {
+				refresh('/summary');
+				return;
+			}
 			setFeedback({ status: 'error', text: errorMessage(caught) });
 			speak(errorMessage(caught), 'assertive');
 		}
 	};
+
+	// Right after activation: the first scan is queued on WP-Cron, which a quiet site, a failing
+	// loopback or DISABLE_WP_CRON can hold up. Start it from here instead, once per page load.
+	const autoStarted = useRef(false);
+	useEffect(() => {
+		if (!summary?.first_scan || summary.running || scan.busy || autoStarted.current) {
+			return;
+		}
+		autoStarted.current = true;
+		runScan(true);
+	}, [summary, scan.busy]);
 
 	if (!summary) {
 		return (
@@ -170,7 +186,7 @@ export const App = () => {
 	return (
 		<MultiSourceContext.Provider value={multiSource}>
 		<div className="rdi-app">
-			<Banner others={presence.others} latest={latest} running={running} onScan={runScan} />
+			<Banner others={presence.others} latest={latest} running={running} onScan={() => runScan()} />
 
 			{presence.note && (
 				<Notice className="rdi-feedback" status="info" onRemove={presence.dismiss} spokenMessage={null}>

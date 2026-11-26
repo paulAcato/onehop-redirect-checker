@@ -92,13 +92,34 @@ final class Scheduler extends Singleton {
 	/**
 	 * Queue the activation scan on the current site. In the background (WP-Cron, on the next
 	 * request) rather than in the activation request itself, which a large site could time out.
+	 * With WP-Cron switched off (DISABLE_WP_CRON) the event may wait for a real cron job that is
+	 * not there, so a single-site activation scans right away instead (the scan has its own time
+	 * budget). A network activation still queues one per site: scanning them all in one request
+	 * could time out, and each site's dashboard starts its pending scan when opened.
+	 *
+	 * @param bool $inline Whether this activation may scan in the current request.
 	 *
 	 * @return void
 	 */
-	public static function queue_activation_scan(): void {
+	public static function queue_activation_scan( bool $inline = true ): void {
+		if ( $inline && defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON ) {
+			self::run_activation_scan();
+			return;
+		}
+
 		if ( ! wp_next_scheduled( self::ACTIVATION_HOOK ) ) {
 			wp_schedule_single_event( time(), self::ACTIVATION_HOOK );
 		}
+	}
+
+	/**
+	 * Whether the activation scan is still waiting for WP-Cron (which a quiet site, a failing
+	 * loopback or DISABLE_WP_CRON can hold up for a long time).
+	 *
+	 * @return bool
+	 */
+	public static function activation_pending(): bool {
+		return (bool) wp_next_scheduled( self::ACTIVATION_HOOK );
 	}
 
 	/**

@@ -70,12 +70,25 @@ final class Analyzer {
 	 * @param Matcher        $matcher    Matcher holding all rules.
 	 * @param Url_Normalizer $normalizer Normaliser.
 	 * @param float          $deadline   microtime(true) after which optional checks stop.
+	 * @param string[]|null  $writable   Sources whose rules a fix may change (null: all).
 	 */
 	public function __construct(
 		private Matcher $matcher,
 		private Url_Normalizer $normalizer,
-		private float $deadline
+		private float $deadline,
+		private ?array $writable = null
 	) {}
+
+	/**
+	 * Whether a fix may change this rule: an exact rule of a source that can be written.
+	 *
+	 * @param Rule $rule Rule.
+	 *
+	 * @return bool
+	 */
+	private function changeable( Rule $rule ): bool {
+		return $rule->is_exact() && ( null === $this->writable || in_array( $rule->source, $this->writable, true ) );
+	}
 
 	/**
 	 * Analyse all rules.
@@ -226,7 +239,7 @@ final class Analyzer {
 		for ( $steps = 1; $steps < self::MAX_HOPS; $steps = count( $hops ) ) {
 			$index = array_search( $current, $path, true );
 			if ( false !== $index ) {
-				$this->record_loop( $rule, array_slice( $path, (int) $index ), array_slice( $hops, (int) $index ), 0 !== $index, $hops );
+				$this->record_loop( $rule, array_slice( $path, (int) $index ), array_slice( $hops, (int) $index ), 0 !== $index, $hops, array_slice( array_merge( [ $rule ], $later ), (int) $index ) );
 				return null;
 			}
 
@@ -258,14 +271,70 @@ final class Analyzer {
 					$this->display( $current ),
 					count( $hops )
 				),
-				// The fix writes the final rule's own target as stored (not the normalised key), and only
-				// when it is a plain, safe URL or path.
-				// The later hops must still be as scanned when the fix is applied.
-				$rule->is_exact() && $last->is_exact() && count( $hops ) < self::MAX_HOPS && Url_Normalizer::is_safe_target( $last_raw ) ? self::fix( 'retarget', [ $rule ], $last_raw, $later ) : []
+				$this->chain_fix( array_merge( [ $rule ], $later ), $last_raw, count( $hops ) )
 			);
 		}
 
 		return $current;
+	}
+
+	/**
+	 * Fix for a chain: point every rule but the last straight to the final target, so each URL in
+	 * the chain takes one hop. The final rule's own target is written as stored (not the normalised
+	 * key), and only when it is a plain, safe URL or path, and the first and last rule are exact.
+	 * When a rule in between is a pattern (or its plugin can't be written), only the first rule is
+	 * pointed to the end. The rules left as they are must still be as scanned when it is applied.
+	 *
+	 * @param Rule[] $rules  Rules in walk order, one per hop.
+	 * @param string $target Final target as stored on the last rule.
+	 * @param int    $hops   Number of hops.
+	 *
+	 * @return array
+	 */
+	private function chain_fix( array $rules, string $target, int $hops ): array {
+		$first = $rules[0];
+		$last  = $rules[ count( $rules ) - 1 ];
+		if ( ! $this->changeable( $first ) || ! $last->is_exact() || $hops >= self::MAX_HOPS || ! Url_Normalizer::is_safe_target( $target ) ) {
+			return [];
+		}
+
+		$change = array_slice( $rules, 0, -1 );
+		if ( count( array_filter( $change, [ $this, 'changeable' ] ) ) !== count( $change ) ) {
+			$change = [ $first ];
+		}
+
+		return self::fix( 'retarget', $change, $target, array_slice( $rules, count( $change ) ) );
+	}
+
+	/**
+	 * Fix for a loop of more than one rule: a loop has no end, so the person picks the URL that
+	 * should load (Fixer: `keep`). That URL's rule is switched off and every other rule points
+	 * straight to it. Only when every rule may be changed and its source is a safe target.
+	 *
+	 * Only URLs that nothing else redirects once their rule is off can be kept (`candidates`): with
+	 * a duplicate, conflicting or pattern rule for the same URL, that rule would take over and the
+	 * loop could go on.
+	 *
+	 * @param Rule[] $rules Rules in the cycle, in hop order.
+	 *
+	 * @return array
+	 */
+	private function loop_fix( array $rules ): array {
+		if ( count( $rules ) < 2 ) {
+			return [];
+		}
+		foreach ( $rules as $rule ) {
+			if ( ! $this->changeable( $rule ) || ! Url_Normalizer::is_safe_target( trim( $rule->from ) ) ) {
+				return [];
+			}
+		}
+
+		$candidates = array_keys( array_filter( $rules, [ $this->matcher, 'is_only_match' ] ) );
+		if ( ! $candidates ) {
+			return [];
+		}
+
+		return self::fix( 'break', $rules ) + [ 'candidates' => $candidates ];
 	}
 
 	/**
@@ -277,14 +346,16 @@ final class Analyzer {
 	 * @param array[]  $cycle_hops  Hops in the cycle.
 	 * @param bool     $leads_in    Whether the starting rule leads into the cycle from outside.
 	 * @param array[]  $all_hops    All hops walked.
+	 * @param Rule[]   $cycle_rules Rules in the cycle, one per hop in $cycle_hops.
 	 *
 	 * @return void
 	 */
-	private function record_loop( Rule $rule, array $cycle, array $cycle_hops, bool $leads_in, array $all_hops ): void {
+	private function record_loop( Rule $rule, array $cycle, array $cycle_hops, bool $leads_in, array $all_hops, array $cycle_rules ): void {
 		$folded    = array_map( [ Url_Normalizer::class, 'fold' ], $cycle );
 		$min       = array_keys( $folded, min( $folded ), true )[0];
 		$canonical = array_merge( array_slice( $folded, $min ), array_slice( $folded, 0, $min ) );
 		$hops      = array_merge( array_slice( $cycle_hops, $min ), array_slice( $cycle_hops, 0, $min ) );
+		$rules     = array_merge( array_slice( $cycle_rules, $min ), array_slice( $cycle_rules, 0, $min ) );
 		$plugins   = array_unique( array_column( array_column( $hops, 'rule' ), 'label' ) );
 
 		$this->add(
@@ -300,7 +371,8 @@ final class Analyzer {
 					__( 'Endless loop across %s. Visitors get "too many redirects". Break the loop by changing or removing one of these rules.', 'onehop-redirect-checker' ),
 					implode( ', ', $plugins )
 				)
-				: __( 'Endless loop. Visitors get "too many redirects". Break the loop by changing or removing one of these rules.', 'onehop-redirect-checker' )
+				: __( 'Endless loop. Visitors get "too many redirects". Break the loop by changing or removing one of these rules.', 'onehop-redirect-checker' ),
+			$this->loop_fix( $rules )
 		);
 
 		if ( $leads_in ) {
@@ -500,7 +572,7 @@ final class Analyzer {
 	 * @param string  $target     Final target shown.
 	 * @param array[] $hops       Hops.
 	 * @param string  $suggestion What to do.
-	 * @param array   $fix        Unambiguous automatic fix: { action: retarget|disable, rules: [ {source,id,from,to} ], to?: string }, or [].
+	 * @param array   $fix        Automatic fix: { action: retarget|disable|break, rules: [ {source,id,from,to} ], to?: string }, or [].
 	 *
 	 * @return void
 	 */
@@ -526,7 +598,7 @@ final class Analyzer {
 	/**
 	 * Fix payload referencing rules by source, ID and their current from/to (checked before applying).
 	 *
-	 * @param string $action retarget|disable.
+	 * @param string $action retarget|disable|break.
 	 * @param Rule[] $rules  Rules to change.
 	 * @param string $to     New target (retarget).
 	 * @param Rule[] $requires Rules the fix relies on without changing them (re-checked before applying).

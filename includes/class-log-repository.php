@@ -458,6 +458,29 @@ final class Log_Repository {
 	}
 
 	/**
+	 * Open (not fixed) issues of one type in a scan, with only their ID and fix.
+	 *
+	 * @param int    $scan_id Scan ID.
+	 * @param string $type    Issue type.
+	 *
+	 * @return array<int, array{id:int, fix:array|null}>
+	 */
+	public static function open_issues( int $scan_id, string $type ): array {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery -- Own table.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT id, fix FROM %i WHERE scan_id = %d AND type = %s AND ( fixed IS NULL OR fixed = '' )", Installer::issues_table(), $scan_id, $type ), ARRAY_A );
+
+		return array_map(
+			static fn( $row ) => [
+				'id'  => (int) $row['id'],
+				'fix' => ! empty( $row['fix'] ) ? json_decode( (string) $row['fix'], true ) : null,
+			],
+			(array) $rows
+		);
+	}
+
+	/**
 	 * Store a live-check result on an issue.
 	 *
 	 * @param int   $issue_id Issue ID.

@@ -101,7 +101,7 @@ final class Installer extends Singleton {
 			) as $site_id ) {
 				switch_to_blog( (int) $site_id );
 				self::install();
-				Scheduler::queue_activation_scan();
+				Scheduler::queue_activation_scan( false );
 				restore_current_blog();
 			}
 			return;

@@ -74,6 +74,8 @@ export interface Retention {
 
 export interface Summary {
 	latest: Scan | null;
+	/** The scan queued on activation has not run yet; the dashboard starts it. */
+	first_scan?: boolean;
 	trend: TrendPoint[];
 	sources: SourceSummary[];
 	running: boolean;
@@ -166,9 +168,14 @@ export interface FixRule {
 }
 
 export interface Fix {
-	action: 'retarget' | 'disable';
+	/** retarget: point the rules to `to`; disable: switch them off; break: a loop, see FixModal. */
+	action: 'retarget' | 'disable' | 'break';
 	to?: string;
 	rules: FixRule[];
+	/** break: indexes in `rules` whose URL may be kept (nothing else redirects it). */
+	candidates?: number[];
+	/** Rules the fix relies on without changing them. */
+	requires?: FixRule[];
 }
 
 export interface Fixed {
